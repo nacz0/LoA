@@ -70,6 +70,19 @@ Probe a node:
 python -m loa node-probe http://127.0.0.1:8765
 ```
 
+Node metadata endpoints:
+
+```text
+GET /api/node/health
+GET /api/node/info
+GET /api/node/agents
+GET /api/node/models
+GET /api/nodes/status
+```
+
+The web UI can add, edit, delete, and probe LAN nodes. Node entries are
+persisted to `loa.config.json`; saved tokens are not returned by the list API.
+
 ## Troubleshooting
 
 `Config already exists: loa.config.json` means the local config file is already present. Edit it directly, or overwrite it intentionally:

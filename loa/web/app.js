@@ -1,7 +1,9 @@
 const state = {
   agents: [],
   providers: [],
+  nodes: [],
   selectedAgent: "",
+  selectedNode: "",
   messages: [],
   busy: false,
 };
@@ -11,6 +13,7 @@ const els = {
   serverLine: document.querySelector("#serverLine"),
   agentList: document.querySelector("#agentList"),
   providerList: document.querySelector("#providerList"),
+  nodeList: document.querySelector("#nodeList"),
   agentSelect: document.querySelector("#agentSelect"),
   agentForm: document.querySelector("#agentForm"),
   agentNameInput: document.querySelector("#agentNameInput"),
@@ -22,6 +25,15 @@ const els = {
   maxTokensInput: document.querySelector("#maxTokensInput"),
   deleteAgentButton: document.querySelector("#deleteAgentButton"),
   newAgentButton: document.querySelector("#newAgentButton"),
+  nodeForm: document.querySelector("#nodeForm"),
+  nodeNameInput: document.querySelector("#nodeNameInput"),
+  nodeUrlInput: document.querySelector("#nodeUrlInput"),
+  nodeTokenInput: document.querySelector("#nodeTokenInput"),
+  nodeWeightInput: document.querySelector("#nodeWeightInput"),
+  nodeEnabledInput: document.querySelector("#nodeEnabledInput"),
+  nodeRolesInput: document.querySelector("#nodeRolesInput"),
+  deleteNodeButton: document.querySelector("#deleteNodeButton"),
+  newNodeButton: document.querySelector("#newNodeButton"),
   messages: document.querySelector("#messages"),
   form: document.querySelector("#chatForm"),
   input: document.querySelector("#messageInput"),
@@ -69,7 +81,7 @@ function renderAgents() {
         <span>${escapeHtml(agent.name)}</span>
         <span class="pill">${escapeHtml(agent.model)}</span>
       </span>
-      <span class="meta">${escapeHtml(agent.provider)} · temp ${agent.temperature}</span>
+      <span class="meta">${escapeHtml(agent.provider)} - temp ${agent.temperature}</span>
     `;
     row.addEventListener("click", () => {
       selectAgent(agent.name);
@@ -165,6 +177,75 @@ function renderProviders() {
   }
 }
 
+function renderNodes() {
+  els.nodeList.innerHTML = "";
+
+  for (const node of state.nodes) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "row";
+    row.dataset.node = node.name;
+    const status = node.enabled ? (node.status || "unknown") : "disabled";
+    const ok = node.ok && node.enabled;
+    const latency = Number.isFinite(node.latency_ms) ? ` - ${node.latency_ms} ms` : "";
+    const roles = (node.roles || []).join(", ");
+    row.innerHTML = `
+      <span class="row-title">
+        <span>${escapeHtml(node.name)}</span>
+        <span class="pill ${ok ? "ok" : "error"}">${escapeHtml(status)}</span>
+      </span>
+      <span class="meta">${escapeHtml(node.url)}${latency}</span>
+      <span class="muted">${escapeHtml(roles || "chat")}</span>
+    `;
+    row.addEventListener("click", () => {
+      selectNode(node.name);
+    });
+    els.nodeList.append(row);
+  }
+
+  if (!state.selectedNode && state.nodes.length) {
+    state.selectedNode = state.nodes[0].name;
+  }
+  updateActiveNode();
+  fillNodeForm();
+}
+
+function updateActiveNode() {
+  document.querySelectorAll("[data-node]").forEach((row) => {
+    row.classList.toggle("active", row.dataset.node === state.selectedNode);
+  });
+}
+
+function selectNode(name) {
+  state.selectedNode = name;
+  updateActiveNode();
+  fillNodeForm();
+}
+
+function fillNodeForm() {
+  const node = state.nodes.find((item) => item.name === state.selectedNode);
+  els.deleteNodeButton.disabled = !node;
+  if (!node) {
+    els.nodeNameInput.value = "";
+    els.nodeUrlInput.value = "";
+    els.nodeTokenInput.value = "";
+    els.nodeTokenInput.placeholder = "opcjonalnie";
+    els.nodeWeightInput.value = "1";
+    els.nodeEnabledInput.checked = true;
+    els.nodeRolesInput.value = "chat";
+    return;
+  }
+  els.nodeNameInput.value = node.name;
+  els.nodeUrlInput.value = node.url;
+  els.nodeTokenInput.value = "";
+  els.nodeTokenInput.placeholder = node.has_token
+    ? "token zapisany, zostaw puste aby zachowac"
+    : "opcjonalnie";
+  els.nodeWeightInput.value = node.weight || 1;
+  els.nodeEnabledInput.checked = Boolean(node.enabled);
+  els.nodeRolesInput.value = (node.roles || ["chat"]).join(", ");
+}
+
 function renderMessages() {
   els.messages.innerHTML = "";
   if (!state.messages.length) {
@@ -190,17 +271,25 @@ function renderMessages() {
 async function refresh() {
   setStatus("", "Sprawdzanie");
   try {
-    const [health, agents, providerModels] = await Promise.all([
+    const [health, agents, providerModels, nodes, nodeStatuses] = await Promise.all([
       api("/api/health"),
       api("/api/agents"),
       api("/api/provider-models"),
+      api("/api/nodes"),
+      api("/api/nodes/status"),
     ]);
     state.agents = agents.agents;
     state.providers = providerModels.providers;
-    els.serverLine.textContent = `${health.providers.length} providerow · ${health.agents.length} agentow`;
+    const statusByName = new Map(nodeStatuses.nodes.map((node) => [node.name, node]));
+    state.nodes = nodes.nodes.map((node) => ({
+      ...node,
+      ...(statusByName.get(node.name) || {}),
+    }));
+    els.serverLine.textContent = `${health.providers.length} providerow - ${health.agents.length} agentow - ${state.nodes.length} node'ow`;
     renderProviderSelect();
     renderAgents();
     renderProviders();
+    renderNodes();
     setStatus("ok", "Online");
   } catch (error) {
     setStatus("error", "Blad");
@@ -211,6 +300,81 @@ async function refresh() {
     });
     renderMessages();
   }
+}
+
+async function saveNode(event) {
+  event.preventDefault();
+  const payload = {
+    name: els.nodeNameInput.value.trim(),
+    url: els.nodeUrlInput.value.trim(),
+    token: els.nodeTokenInput.value.trim() || undefined,
+    enabled: els.nodeEnabledInput.checked,
+    weight: Number(els.nodeWeightInput.value || 1),
+    roles: els.nodeRolesInput.value
+      .split(",")
+      .map((role) => role.trim())
+      .filter(Boolean),
+  };
+  try {
+    const result = await api("/api/nodes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.selectedNode = result.node;
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Zapisano node ${result.node}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+async function deleteNode() {
+  const name = els.nodeNameInput.value.trim();
+  if (!name) {
+    return;
+  }
+  try {
+    await api(`/api/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
+    state.selectedNode = "";
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Usunieto node ${name}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+function newNode() {
+  state.selectedNode = "";
+  updateActiveNode();
+  els.nodeNameInput.value = "node-" + String(state.nodes.length + 1);
+  els.nodeUrlInput.value = "";
+  els.nodeTokenInput.value = "";
+  els.nodeTokenInput.placeholder = "opcjonalnie";
+  els.nodeWeightInput.value = "1";
+  els.nodeEnabledInput.checked = true;
+  els.nodeRolesInput.value = "chat";
+  els.deleteNodeButton.disabled = true;
+  els.nodeNameInput.focus();
 }
 
 async function saveAgent(event) {
@@ -313,7 +477,7 @@ async function sendMessage(event) {
     });
     state.messages.push({
       role: "assistant",
-      label: `${result.agent} · ${result.model}`,
+      label: `${result.agent} - ${result.model}`,
       content: result.message,
     });
   } catch (error) {
@@ -347,6 +511,9 @@ els.form.addEventListener("submit", sendMessage);
 els.agentForm.addEventListener("submit", saveAgent);
 els.deleteAgentButton.addEventListener("click", deleteAgent);
 els.newAgentButton.addEventListener("click", newAgent);
+els.nodeForm.addEventListener("submit", saveNode);
+els.deleteNodeButton.addEventListener("click", deleteNode);
+els.newNodeButton.addEventListener("click", newNode);
 els.providerSelect.addEventListener("change", fillModelOptions);
 els.agentSelect.addEventListener("change", () => {
   updateActiveAgent();

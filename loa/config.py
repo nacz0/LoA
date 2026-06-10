@@ -37,6 +37,7 @@ class AgentConfig:
 class NodeConfig:
     name: str
     url: str
+    token: str | None = None
     enabled: bool = True
     weight: int = 1
     roles: tuple[str, ...] = ("chat",)
@@ -79,6 +80,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "local": {
             "url": "http://127.0.0.1:8765",
             "enabled": True,
+            "token": None,
             "weight": 1,
             "roles": ["chat"],
         }
@@ -246,12 +248,17 @@ def _parse_agent(name: str, value: Any) -> AgentConfig:
 def _parse_node(name: str, value: Any) -> NodeConfig:
     if not isinstance(value, dict):
         raise ConfigError(f"node {name!r} must be an object")
+    url = str(value.get("url", "")).strip().rstrip("/")
+    if not url:
+        raise ConfigError(f"node {name!r} is missing url")
     roles = value.get("roles", ["chat"])
     if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
         raise ConfigError(f"node {name!r} roles must be a list of strings")
+    token = value.get("token")
     return NodeConfig(
         name=name,
-        url=str(value.get("url", "")).rstrip("/"),
+        url=url,
+        token=str(token) if token else None,
         enabled=bool(value.get("enabled", True)),
         weight=int(value.get("weight", 1)),
         roles=tuple(roles),

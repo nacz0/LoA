@@ -233,6 +233,10 @@ button:focus {
   gap: 10px;
 }
 
+.compact-form {
+  margin-top: 12px;
+}
+
 .agent-form label {
   display: grid;
   gap: 5px;
@@ -257,6 +261,19 @@ button:focus {
 
 .form-actions button {
   height: 36px;
+}
+
+.checkbox-label {
+  align-content: end;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  min-height: 56px;
+}
+
+.checkbox-label input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
 }
 
 .messages {

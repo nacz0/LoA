@@ -9,7 +9,7 @@ import unittest
 from urllib import request
 
 from loa.agents import AgentRuntime
-from loa.config import AgentConfig, AppConfig, ProviderConfig
+from loa.config import AgentConfig, AppConfig, NodeConfig, ProviderConfig
 from loa.providers import BaseProvider, ChatResult
 from loa.server import make_handler
 
@@ -85,6 +85,54 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(payload["providers"][0]["name"], "fake")
         self.assertEqual(payload["providers"][0]["models"], ["fake-model"])
+
+    def test_node_health_and_info(self) -> None:
+        with request.urlopen(self.base_url + "/api/node/health", timeout=5) as response:
+            health = json.loads(response.read().decode("utf-8"))
+        with request.urlopen(self.base_url + "/api/node/info", timeout=5) as response:
+            info = json.loads(response.read().decode("utf-8"))
+
+        self.assertTrue(health["ok"])
+        self.assertEqual(health["app"], "loa")
+        self.assertEqual(info["agents_detail"][0]["name"], "assistant")
+        self.assertIn("/api/node/health", info["endpoints"])
+
+    def test_disabled_node_status_is_reported_without_probe(self) -> None:
+        config = AppConfig(
+            providers=self.config.providers,
+            agents=self.config.agents,
+            nodes={
+                "remote": NodeConfig(
+                    name="remote",
+                    url="http://127.0.0.1:1",
+                    enabled=False,
+                    weight=2,
+                    roles=("chat",),
+                )
+            },
+            default_agent="assistant",
+        )
+        handler = make_handler(
+            config,
+            AgentRuntime(config, providers=self.runtime.providers),
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+            with request.urlopen(
+                f"http://{host}:{port}/api/nodes/status",
+                timeout=5,
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(payload["nodes"][0]["name"], "remote")
+        self.assertEqual(payload["nodes"][0]["status"], "disabled")
 
 
 class WritableServerTests(unittest.TestCase):
@@ -189,6 +237,56 @@ class WritableServerTests(unittest.TestCase):
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertTrue(result["ok"])
         self.assertNotIn("coder", saved["agents"])
+
+    def test_save_node_updates_config_file_without_listing_token(self) -> None:
+        payload = {
+            "name": "desktop",
+            "url": "http://192.168.1.40:8765",
+            "token": "shared-token",
+            "enabled": True,
+            "weight": 3,
+            "roles": ["chat", "code"],
+        }
+        req = request.Request(
+            self.base_url + "/api/nodes",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        with request.urlopen(self.base_url + "/api/nodes", timeout=5) as response:
+            listed = json.loads(response.read().decode("utf-8"))
+
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertTrue(result["ok"])
+        self.assertEqual(saved["nodes"]["desktop"]["token"], "shared-token")
+        self.assertTrue(listed["nodes"][0]["has_token"])
+        self.assertNotIn("token", listed["nodes"][0])
+
+    def test_delete_node_updates_config_file(self) -> None:
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        saved["nodes"] = {
+            "desktop": {
+                "url": "http://192.168.1.40:8765",
+                "enabled": True,
+                "weight": 1,
+                "roles": ["chat"],
+            }
+        }
+        self.config_path.write_text(json.dumps(saved), encoding="utf-8")
+        req = request.Request(
+            self.base_url + "/api/nodes/desktop",
+            method="DELETE",
+        )
+
+        with request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertTrue(result["ok"])
+        self.assertNotIn("desktop", saved["nodes"])
 
 
 if __name__ == "__main__":

@@ -71,6 +71,46 @@
           </div>
           <div id="providerList" class="list"></div>
         </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Node'y</h2>
+            <button class="icon-button" id="newNodeButton" title="Nowy node">+</button>
+          </div>
+          <div id="nodeList" class="list"></div>
+          <form id="nodeForm" class="agent-form compact-form">
+            <label>
+              Nazwa
+              <input id="nodeNameInput" name="name" autocomplete="off" required>
+            </label>
+            <label>
+              URL
+              <input id="nodeUrlInput" name="url" autocomplete="off" placeholder="http://192.168.1.40:8765" required>
+            </label>
+            <label>
+              Token
+              <input id="nodeTokenInput" name="token" autocomplete="off" placeholder="zostaw puste, aby zachowac">
+            </label>
+            <div class="form-grid">
+              <label>
+                Waga
+                <input id="nodeWeightInput" name="weight" type="number" min="1" step="1">
+              </label>
+              <label class="checkbox-label">
+                <input id="nodeEnabledInput" name="enabled" type="checkbox">
+                Aktywny
+              </label>
+            </div>
+            <label>
+              Role
+              <input id="nodeRolesInput" name="roles" autocomplete="off" placeholder="chat, code">
+            </label>
+            <div class="form-actions">
+              <button type="submit">Zapisz</button>
+              <button type="button" class="secondary-button" id="deleteNodeButton">Usun</button>
+            </div>
+          </form>
+        </section>
       </aside>
 
       <section class="chat-shell" aria-label="Czat">

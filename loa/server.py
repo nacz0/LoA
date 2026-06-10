@@ -4,9 +4,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
+import time
 from typing import Any
+from urllib import error, request
 from urllib.parse import urlparse
 
+from . import __version__
 from .agents import AgentError, AgentRuntime
 from .config import AppConfig, ConfigError, load_config, read_config_data, write_config_data
 from .providers import ProviderError
@@ -34,7 +37,6 @@ def make_handler(
     runtime: AgentRuntime,
     config_path: Path | None = None,
 ) -> type[BaseHTTPRequestHandler]:
-    api_token = config.api_token
     web_root = Path(__file__).with_name("web")
     state: dict[str, Any] = {"config": config, "runtime": runtime}
 
@@ -71,23 +73,34 @@ def make_handler(
                 )
                 return
 
+            if path == "/api/node/health":
+                if not self._authorized():
+                    return
+                self._send_json(self._node_health())
+                return
+
+            if path == "/api/node/info":
+                if not self._authorized():
+                    return
+                self._send_json(self._node_info())
+                return
+
+            if path == "/api/node/agents":
+                if not self._authorized():
+                    return
+                self._send_json({"agents": self._agent_rows()})
+                return
+
+            if path == "/api/node/models":
+                if not self._authorized():
+                    return
+                self._send_json({"providers": self._provider_model_report()})
+                return
+
             if path == "/api/agents":
                 if not self._authorized():
                     return
-                self._send_json(
-                    {
-                        "agents": [
-                            {
-                                "name": agent.name,
-                                "provider": agent.provider,
-                                "model": agent.model,
-                                "temperature": agent.temperature,
-                                "max_tokens": agent.max_tokens,
-                            }
-                            for agent in self._config().agents.values()
-                        ]
-                    }
-                )
+                self._send_json({"agents": self._agent_rows()})
                 return
 
             if path == "/api/providers":
@@ -105,6 +118,18 @@ def make_handler(
                         ]
                     }
                 )
+                return
+
+            if path == "/api/nodes":
+                if not self._authorized():
+                    return
+                self._send_json({"nodes": self._node_rows()})
+                return
+
+            if path == "/api/nodes/status":
+                if not self._authorized():
+                    return
+                self._send_json({"nodes": self._node_status_report()})
                 return
 
             if path == "/api/provider-models":
@@ -146,6 +171,10 @@ def make_handler(
                 self._handle_save_agent()
                 return
 
+            if path == "/api/nodes":
+                self._handle_save_node()
+                return
+
             if path == "/v1/chat/completions":
                 self._handle_openai_chat()
                 return
@@ -159,6 +188,10 @@ def make_handler(
             if path.startswith("/api/agents/"):
                 name = path.rsplit("/", 1)[-1]
                 self._handle_delete_agent(name)
+                return
+            if path.startswith("/api/nodes/"):
+                name = path.rsplit("/", 1)[-1]
+                self._handle_delete_node(name)
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -301,14 +334,141 @@ def make_handler(
 
             self._send_json({"ok": True})
 
+        def _handle_save_node(self) -> None:
+            body = self._read_json()
+            if body is None:
+                return
+            if config_path is None:
+                self._send_error(HTTPStatus.CONFLICT, "config file is not writable")
+                return
+
+            try:
+                raw = read_config_data(config_path)
+                nodes = raw.setdefault("nodes", {})
+                if not isinstance(nodes, dict):
+                    raise ConfigError("nodes must be an object")
+                name = _clean_config_name(body.get("name"), "node")
+                url = str(body.get("url", "")).strip().rstrip("/")
+                if not url:
+                    raise ConfigError("node url is required")
+                existing = nodes.get(name)
+                if not isinstance(existing, dict):
+                    existing = {}
+                token = body.get("token")
+                if token is None or token == "":
+                    token = existing.get("token")
+                roles = _parse_roles(body.get("roles", ["chat"]))
+                nodes[name] = {
+                    "url": url,
+                    "enabled": bool(body.get("enabled", True)),
+                    "token": str(token) if token else None,
+                    "weight": int(body.get("weight", 1)),
+                    "roles": roles,
+                }
+                write_config_data(config_path, raw)
+                self._reload_config()
+            except (ConfigError, TypeError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            self._send_json({"ok": True, "node": name})
+
+        def _handle_delete_node(self, raw_name: str) -> None:
+            if config_path is None:
+                self._send_error(HTTPStatus.CONFLICT, "config file is not writable")
+                return
+            name = raw_name.strip()
+            try:
+                raw = read_config_data(config_path)
+                nodes = raw.get("nodes")
+                if not isinstance(nodes, dict) or name not in nodes:
+                    self._send_error(HTTPStatus.NOT_FOUND, "node not found")
+                    return
+                del nodes[name]
+                write_config_data(config_path, raw)
+                self._reload_config()
+            except ConfigError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            self._send_json({"ok": True})
+
         def _authorized(self) -> bool:
-            if not api_token:
+            current_token = self._config().api_token
+            if not current_token:
                 return True
             header = self.headers.get("Authorization", "")
-            if header == f"Bearer {api_token}":
+            if header == f"Bearer {current_token}":
                 return True
             self._send_error(HTTPStatus.UNAUTHORIZED, "missing or invalid token")
             return False
+
+        def _node_health(self) -> dict[str, Any]:
+            return {
+                "ok": True,
+                "app": "loa",
+                "version": __version__,
+                "agents": self._runtime().agent_names(),
+                "providers": self._runtime().provider_names(),
+                "auth_enabled": bool(self._config().api_token),
+            }
+
+        def _node_info(self) -> dict[str, Any]:
+            config = self._config()
+            return {
+                **self._node_health(),
+                "server": {
+                    "bind_host": config.bind_host,
+                    "bind_port": config.bind_port,
+                },
+                "agents_detail": self._agent_rows(),
+                "providers_detail": [
+                    {
+                        "name": provider.name,
+                        "type": provider.type,
+                        "base_url": provider.base_url,
+                    }
+                    for provider in config.providers.values()
+                ],
+                "nodes": self._node_rows(),
+                "endpoints": [
+                    "/api/node/health",
+                    "/api/node/info",
+                    "/api/node/agents",
+                    "/api/node/models",
+                    "/api/chat",
+                    "/v1/chat/completions",
+                ],
+            }
+
+        def _agent_rows(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "name": agent.name,
+                    "provider": agent.provider,
+                    "model": agent.model,
+                    "system": agent.system,
+                    "temperature": agent.temperature,
+                    "max_tokens": agent.max_tokens,
+                }
+                for agent in self._config().agents.values()
+            ]
+
+        def _node_rows(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "name": node.name,
+                    "url": node.url,
+                    "enabled": node.enabled,
+                    "has_token": bool(node.token),
+                    "weight": node.weight,
+                    "roles": list(node.roles),
+                }
+                for node in self._config().nodes.values()
+            ]
+
+        def _node_status_report(self) -> list[dict[str, Any]]:
+            return [_probe_node(node) for node in self._config().nodes.values()]
 
         def _provider_model_report(self) -> list[dict[str, Any]]:
             providers: list[dict[str, Any]] = []
@@ -379,7 +539,7 @@ def make_handler(
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
             self.end_headers()
             self.wfile.write(data)
 
@@ -402,11 +562,15 @@ def make_handler(
 
 
 def _clean_agent_name(value: object) -> str:
+    return _clean_config_name(value, "agent")
+
+
+def _clean_config_name(value: object, label: str) -> str:
     name = str(value or "").strip()
     if not name:
-        raise ConfigError("agent name is required")
+        raise ConfigError(f"{label} name is required")
     if not all(char.isalnum() or char in {"_", "-"} for char in name):
-        raise ConfigError("agent name may only contain letters, digits, _ and -")
+        raise ConfigError(f"{label} name may only contain letters, digits, _ and -")
     return name
 
 
@@ -414,3 +578,78 @@ def _optional_int(value: object) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _parse_roles(value: object) -> list[str]:
+    if isinstance(value, str):
+        roles = [role.strip() for role in value.split(",")]
+    elif isinstance(value, list):
+        roles = [str(role).strip() for role in value]
+    else:
+        raise ConfigError("node roles must be a list or comma-separated string")
+    roles = [role for role in roles if role]
+    if not roles:
+        raise ConfigError("node roles must not be empty")
+    return roles
+
+
+def _probe_node(node: Any) -> dict[str, Any]:
+    started = time.monotonic()
+    base = {
+        "name": node.name,
+        "url": node.url,
+        "enabled": node.enabled,
+        "weight": node.weight,
+        "roles": list(node.roles),
+    }
+    if not node.enabled:
+        return {**base, "ok": False, "status": "disabled", "latency_ms": None}
+
+    headers = {"Accept": "application/json"}
+    if node.token:
+        headers["Authorization"] = f"Bearer {node.token}"
+    req = request.Request(
+        node.url.rstrip("/") + "/api/node/health",
+        headers=headers,
+        method="GET",
+    )
+    try:
+        with request.urlopen(req, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        return {
+            **base,
+            "ok": False,
+            "status": "error",
+            "latency_ms": round((time.monotonic() - started) * 1000),
+            "error": f"HTTP {exc.code} {exc.reason}",
+        }
+    except error.URLError as exc:
+        return {
+            **base,
+            "ok": False,
+            "status": "offline",
+            "latency_ms": round((time.monotonic() - started) * 1000),
+            "error": str(exc.reason),
+        }
+    except (json.JSONDecodeError, OSError) as exc:
+        return {
+            **base,
+            "ok": False,
+            "status": "error",
+            "latency_ms": round((time.monotonic() - started) * 1000),
+            "error": str(exc),
+        }
+    if not isinstance(body, dict):
+        body = {}
+    return {
+        **base,
+        "ok": bool(body.get("ok")),
+        "status": "online" if body.get("ok") else "error",
+        "latency_ms": round((time.monotonic() - started) * 1000),
+        "app": body.get("app"),
+        "version": body.get("version"),
+        "agents": body.get("agents", []),
+        "providers": body.get("providers", []),
+        "auth_enabled": bool(body.get("auth_enabled")),
+    }

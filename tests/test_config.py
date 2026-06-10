@@ -32,6 +32,39 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.providers["local"].type, "ollama")
         self.assertEqual(config.agents["assistant"].provider, "local")
 
+    def test_parse_nodes_with_token(self) -> None:
+        config = parse_config(
+            {
+                "providers": {
+                    "local": {
+                        "type": "ollama",
+                        "base_url": "http://localhost:11434",
+                    }
+                },
+                "agents": {
+                    "assistant": {
+                        "provider": "local",
+                        "model": "llama3.2:3b",
+                    }
+                },
+                "nodes": {
+                    "desktop": {
+                        "url": "http://192.168.1.40:8765/",
+                        "token": "secret",
+                        "enabled": True,
+                        "weight": 3,
+                        "roles": ["chat", "code"],
+                    }
+                },
+                "default_agent": "assistant",
+            }
+        )
+
+        node = config.nodes["desktop"]
+        self.assertEqual(node.url, "http://192.168.1.40:8765")
+        self.assertEqual(node.token, "secret")
+        self.assertEqual(node.roles, ("chat", "code"))
+
     def test_missing_provider_is_rejected(self) -> None:
         with self.assertRaises(ConfigError):
             parse_config(

@@ -199,7 +199,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_node_probe(args: argparse.Namespace) -> int:
-    url = args.url.rstrip("/") + "/api/health"
+    url = args.url.rstrip("/") + "/api/node/health"
     headers = {"Accept": "application/json"}
     if args.token:
         headers["Authorization"] = f"Bearer {args.token}"
