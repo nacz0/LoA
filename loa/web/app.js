@@ -1,6 +1,7 @@
 const state = {
   agents: [],
   providers: [],
+  selectedAgent: "",
   messages: [],
   busy: false,
 };
@@ -11,6 +12,16 @@ const els = {
   agentList: document.querySelector("#agentList"),
   providerList: document.querySelector("#providerList"),
   agentSelect: document.querySelector("#agentSelect"),
+  agentForm: document.querySelector("#agentForm"),
+  agentNameInput: document.querySelector("#agentNameInput"),
+  providerSelect: document.querySelector("#providerSelect"),
+  modelInput: document.querySelector("#modelInput"),
+  modelOptions: document.querySelector("#modelOptions"),
+  systemInput: document.querySelector("#systemInput"),
+  temperatureInput: document.querySelector("#temperatureInput"),
+  maxTokensInput: document.querySelector("#maxTokensInput"),
+  deleteAgentButton: document.querySelector("#deleteAgentButton"),
+  newAgentButton: document.querySelector("#newAgentButton"),
   messages: document.querySelector("#messages"),
   form: document.querySelector("#chatForm"),
   input: document.querySelector("#messageInput"),
@@ -61,20 +72,76 @@ function renderAgents() {
       <span class="meta">${escapeHtml(agent.provider)} · temp ${agent.temperature}</span>
     `;
     row.addEventListener("click", () => {
-      els.agentSelect.value = agent.name;
-      updateActiveAgent();
+      selectAgent(agent.name);
     });
     els.agentList.append(row);
   }
 
+  if (!state.selectedAgent && state.agents.length) {
+    state.selectedAgent = state.agents[0].name;
+  }
+  if (state.selectedAgent) {
+    els.agentSelect.value = state.selectedAgent;
+  }
   updateActiveAgent();
+  fillAgentForm();
 }
 
 function updateActiveAgent() {
   const selected = els.agentSelect.value;
+  state.selectedAgent = selected;
   document.querySelectorAll("[data-agent]").forEach((row) => {
     row.classList.toggle("active", row.dataset.agent === selected);
   });
+}
+
+function selectAgent(name) {
+  state.selectedAgent = name;
+  els.agentSelect.value = name;
+  updateActiveAgent();
+  fillAgentForm();
+}
+
+function renderProviderSelect() {
+  els.providerSelect.innerHTML = "";
+  for (const provider of state.providers) {
+    const option = document.createElement("option");
+    option.value = provider.name;
+    option.textContent = provider.name;
+    els.providerSelect.append(option);
+  }
+  fillModelOptions();
+}
+
+function fillModelOptions() {
+  const providerName = els.providerSelect.value;
+  const provider = state.providers.find((item) => item.name === providerName);
+  els.modelOptions.innerHTML = "";
+  for (const model of provider?.models || []) {
+    const option = document.createElement("option");
+    option.value = model;
+    els.modelOptions.append(option);
+  }
+}
+
+function fillAgentForm() {
+  const agent = state.agents.find((item) => item.name === state.selectedAgent);
+  els.deleteAgentButton.disabled = !agent || state.agents.length <= 1;
+  if (!agent) {
+    els.agentNameInput.value = "";
+    els.modelInput.value = "";
+    els.systemInput.value = "";
+    els.temperatureInput.value = "0.2";
+    els.maxTokensInput.value = "512";
+    return;
+  }
+  els.agentNameInput.value = agent.name;
+  els.providerSelect.value = agent.provider;
+  fillModelOptions();
+  els.modelInput.value = agent.model;
+  els.systemInput.value = agent.system || "";
+  els.temperatureInput.value = agent.temperature;
+  els.maxTokensInput.value = agent.max_tokens ?? "";
 }
 
 function renderProviders() {
@@ -131,6 +198,7 @@ async function refresh() {
     state.agents = agents.agents;
     state.providers = providerModels.providers;
     els.serverLine.textContent = `${health.providers.length} providerow · ${health.agents.length} agentow`;
+    renderProviderSelect();
     renderAgents();
     renderProviders();
     setStatus("ok", "Online");
@@ -143,6 +211,78 @@ async function refresh() {
     });
     renderMessages();
   }
+}
+
+async function saveAgent(event) {
+  event.preventDefault();
+  const payload = {
+    name: els.agentNameInput.value.trim(),
+    provider: els.providerSelect.value,
+    model: els.modelInput.value.trim(),
+    system: els.systemInput.value,
+    temperature: Number(els.temperatureInput.value || 0.2),
+    max_tokens: els.maxTokensInput.value ? Number(els.maxTokensInput.value) : null,
+  };
+  try {
+    const result = await api("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.selectedAgent = result.agent;
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Zapisano agenta ${result.agent}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+async function deleteAgent() {
+  const name = els.agentNameInput.value.trim();
+  if (!name || state.agents.length <= 1) {
+    return;
+  }
+  try {
+    await api(`/api/agents/${encodeURIComponent(name)}`, { method: "DELETE" });
+    state.selectedAgent = "";
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Usunieto agenta ${name}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+function newAgent() {
+  state.selectedAgent = "";
+  updateActiveAgent();
+  els.agentNameInput.value = "agent-" + String(state.agents.length + 1);
+  els.providerSelect.value = state.providers[0]?.name || "";
+  fillModelOptions();
+  els.modelInput.value = state.providers[0]?.models?.[0] || "";
+  els.systemInput.value = "";
+  els.temperatureInput.value = "0.2";
+  els.maxTokensInput.value = "512";
+  els.deleteAgentButton.disabled = true;
+  els.agentNameInput.focus();
 }
 
 async function sendMessage(event) {
@@ -204,7 +344,14 @@ function escapeHtml(value) {
 }
 
 els.form.addEventListener("submit", sendMessage);
-els.agentSelect.addEventListener("change", updateActiveAgent);
+els.agentForm.addEventListener("submit", saveAgent);
+els.deleteAgentButton.addEventListener("click", deleteAgent);
+els.newAgentButton.addEventListener("click", newAgent);
+els.providerSelect.addEventListener("change", fillModelOptions);
+els.agentSelect.addEventListener("change", () => {
+  updateActiveAgent();
+  fillAgentForm();
+});
 els.clearButton.addEventListener("click", () => {
   state.messages = [];
   renderMessages();

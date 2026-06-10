@@ -107,12 +107,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     if config_path is None:
         data = DEFAULT_CONFIG
     else:
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        except OSError as exc:
-            raise ConfigError(f"Cannot read config file {config_path}: {exc}") from exc
-        except json.JSONDecodeError as exc:
-            raise ConfigError(f"Invalid JSON in {config_path}: {exc}") from exc
+        data = read_config_data(config_path)
 
     return parse_config(data)
 
@@ -174,6 +169,28 @@ def write_default_config(path: str | Path = DEFAULT_CONFIG_FILE, force: bool = F
         encoding="utf-8",
     )
     return target
+
+
+def read_config_data(path: str | Path) -> dict[str, Any]:
+    config_path = Path(path)
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ConfigError(f"Cannot read config file {config_path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Invalid JSON in {config_path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError(f"Config file {config_path} must contain a JSON object")
+    return data
+
+
+def write_config_data(path: str | Path, data: dict[str, Any]) -> None:
+    config_path = Path(path)
+    parse_config(data)
+    config_path.write_text(
+        json.dumps(data, indent=two_space_indent(), ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def two_space_indent() -> int:

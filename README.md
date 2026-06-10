@@ -61,6 +61,9 @@ Open the web UI:
 http://127.0.0.1:8765/
 ```
 
+The UI can chat with agents and manage them. Agent edits are persisted to
+`loa.config.json`.
+
 Probe a node:
 
 ```powershell

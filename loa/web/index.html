@@ -20,9 +20,49 @@
         <section class="panel">
           <div class="panel-title">
             <h2>Agenci</h2>
-            <button class="icon-button" id="refreshButton" title="Odswiez">R</button>
+            <button class="icon-button" id="newAgentButton" title="Nowy agent">+</button>
           </div>
           <div id="agentList" class="list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Edytor</h2>
+            <button class="icon-button" id="refreshButton" title="Odswiez">R</button>
+          </div>
+          <form id="agentForm" class="agent-form">
+            <label>
+              Nazwa
+              <input id="agentNameInput" name="name" autocomplete="off" required>
+            </label>
+            <label>
+              Provider
+              <select id="providerSelect" name="provider" required></select>
+            </label>
+            <label>
+              Model
+              <input id="modelInput" name="model" list="modelOptions" required>
+              <datalist id="modelOptions"></datalist>
+            </label>
+            <label>
+              System
+              <textarea id="systemInput" name="system" rows="4"></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                Temp
+                <input id="temperatureInput" name="temperature" type="number" min="0" max="2" step="0.1">
+              </label>
+              <label>
+                Max
+                <input id="maxTokensInput" name="max_tokens" type="number" min="1" step="1">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit">Zapisz</button>
+              <button type="button" class="secondary-button" id="deleteAgentButton">Usun</button>
+            </div>
+          </form>
         </section>
 
         <section class="panel">

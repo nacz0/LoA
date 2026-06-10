@@ -8,7 +8,7 @@ from typing import Any
 from urllib import error, request
 
 from .agents import AgentError, AgentRuntime
-from .config import ConfigError, load_config, write_default_config
+from .config import ConfigError, find_config_path, load_config, write_default_config
 from .providers import ProviderError
 from .server import run_server
 
@@ -185,6 +185,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    config_path = find_config_path(args.config)
     if args.host or args.port:
         from dataclasses import replace
 
@@ -193,7 +194,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             bind_host=args.host or config.bind_host,
             bind_port=args.port or config.bind_port,
         )
-    run_server(config)
+    run_server(config, config_path=config_path)
     return 0
 
 
