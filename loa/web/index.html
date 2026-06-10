@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LoA</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>LoA</h1>
+        <p id="serverLine">Lokalni agenci AI</p>
+      </div>
+      <div class="status" id="statusBadge">Sprawdzanie</div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Panel agentow">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Agenci</h2>
+            <button class="icon-button" id="refreshButton" title="Odswiez">R</button>
+          </div>
+          <div id="agentList" class="list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Providery</h2>
+          </div>
+          <div id="providerList" class="list"></div>
+        </section>
+      </aside>
+
+      <section class="chat-shell" aria-label="Czat">
+        <div class="chat-head">
+          <div>
+            <label for="agentSelect">Agent</label>
+            <select id="agentSelect"></select>
+          </div>
+          <button id="clearButton" class="secondary-button">Wyczysc</button>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="messageInput" rows="3" placeholder="Napisz wiadomosc"></textarea>
+          <button id="sendButton" type="submit">Wyslij</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

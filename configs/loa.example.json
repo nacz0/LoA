@@ -1,0 +1,39 @@
+{
+  "server": {
+    "bind_host": "127.0.0.1",
+    "bind_port": 8765,
+    "api_token": null
+  },
+  "providers": {
+    "local-ollama": {
+      "type": "ollama",
+      "base_url": "http://localhost:11434",
+      "timeout_seconds": 120
+    }
+  },
+  "agents": {
+    "assistant": {
+      "provider": "local-ollama",
+      "model": "llama3.2:latest",
+      "system": "Jestes lokalnym, zwiezlym asystentem AI.",
+      "temperature": 0.2,
+      "max_tokens": 512
+    },
+    "coder": {
+      "provider": "local-ollama",
+      "model": "qwen2.5-coder:7b",
+      "system": "Pomagasz przy kodzie. Najpierw diagnozujesz, potem proponujesz konkretne zmiany.",
+      "temperature": 0.1,
+      "max_tokens": 1024
+    }
+  },
+  "nodes": {
+    "local": {
+      "url": "http://127.0.0.1:8765",
+      "enabled": true,
+      "weight": 1,
+      "roles": ["chat"]
+    }
+  },
+  "default_agent": "assistant"
+}
