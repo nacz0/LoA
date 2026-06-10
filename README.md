@@ -83,6 +83,15 @@ GET /api/nodes/status
 The web UI can add, edit, delete, and probe LAN nodes. Node entries are
 persisted to `loa.config.json`; saved tokens are not returned by the list API.
 
+To route an agent to another LoA computer, add a provider in the web UI:
+
+- type: `openai-compatible`
+- base URL: `http://REMOTE_IP:8765/v1`
+- API key: the remote node token, if one is configured
+
+Then create or edit an agent and choose that provider. The model field should
+match an agent exposed by the remote LoA node, for example `assistant`.
+
 ## Troubleshooting
 
 `Config already exists: loa.config.json` means the local config file is already present. Edit it directly, or overwrite it intentionally:

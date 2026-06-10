@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from urllib import request
+from urllib import error, request
 
 from loa.agents import AgentRuntime
 from loa.config import AgentConfig, AppConfig, NodeConfig, ProviderConfig
@@ -237,6 +237,54 @@ class WritableServerTests(unittest.TestCase):
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertTrue(result["ok"])
         self.assertNotIn("coder", saved["agents"])
+
+    def test_save_provider_updates_config_file_without_listing_api_key(self) -> None:
+        payload = {
+            "name": "remote-loa",
+            "type": "openai-compatible",
+            "base_url": "http://192.168.1.40:8765/v1",
+            "api_key": "shared-token",
+            "timeout_seconds": 90,
+        }
+        req = request.Request(
+            self.base_url + "/api/providers",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        with request.urlopen(self.base_url + "/api/providers", timeout=5) as response:
+            listed = json.loads(response.read().decode("utf-8"))
+
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        provider = next(item for item in listed["providers"] if item["name"] == "remote-loa")
+        self.assertTrue(result["ok"])
+        self.assertEqual(saved["providers"]["remote-loa"]["api_key"], "shared-token")
+        self.assertTrue(provider["has_api_key"])
+        self.assertNotIn("api_key", provider)
+
+    def test_delete_provider_used_by_agent_is_rejected(self) -> None:
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        saved["providers"]["remote-loa"] = {
+            "type": "openai-compatible",
+            "base_url": "http://192.168.1.40:8765/v1",
+        }
+        saved["agents"]["remote"] = {
+            "provider": "remote-loa",
+            "model": "assistant",
+        }
+        self.config_path.write_text(json.dumps(saved), encoding="utf-8")
+        req = request.Request(
+            self.base_url + "/api/providers/remote-loa",
+            method="DELETE",
+        )
+
+        with self.assertRaises(error.HTTPError) as caught:
+            request.urlopen(req, timeout=5)
+
+        self.assertEqual(caught.exception.code, 400)
 
     def test_save_node_updates_config_file_without_listing_token(self) -> None:
         payload = {

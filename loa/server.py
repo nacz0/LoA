@@ -106,18 +106,7 @@ def make_handler(
             if path == "/api/providers":
                 if not self._authorized():
                     return
-                self._send_json(
-                    {
-                        "providers": [
-                            {
-                                "name": provider.name,
-                                "type": provider.type,
-                                "base_url": provider.base_url,
-                            }
-                            for provider in self._config().providers.values()
-                        ]
-                    }
-                )
+                self._send_json({"providers": self._provider_rows()})
                 return
 
             if path == "/api/nodes":
@@ -171,6 +160,10 @@ def make_handler(
                 self._handle_save_agent()
                 return
 
+            if path == "/api/providers":
+                self._handle_save_provider()
+                return
+
             if path == "/api/nodes":
                 self._handle_save_node()
                 return
@@ -188,6 +181,10 @@ def make_handler(
             if path.startswith("/api/agents/"):
                 name = path.rsplit("/", 1)[-1]
                 self._handle_delete_agent(name)
+                return
+            if path.startswith("/api/providers/"):
+                name = path.rsplit("/", 1)[-1]
+                self._handle_delete_provider(name)
                 return
             if path.startswith("/api/nodes/"):
                 name = path.rsplit("/", 1)[-1]
@@ -310,6 +307,79 @@ def make_handler(
 
             self._send_json({"ok": True, "agent": name})
 
+        def _handle_save_provider(self) -> None:
+            body = self._read_json()
+            if body is None:
+                return
+            if config_path is None:
+                self._send_error(HTTPStatus.CONFLICT, "config file is not writable")
+                return
+
+            try:
+                raw = read_config_data(config_path)
+                providers = raw.setdefault("providers", {})
+                if not isinstance(providers, dict):
+                    raise ConfigError("providers must be an object")
+                name = _clean_config_name(body.get("name"), "provider")
+                provider_type = str(body.get("type", "")).strip()
+                base_url = str(body.get("base_url", "")).strip().rstrip("/")
+                if provider_type not in {"ollama", "openai-compatible", "openai"}:
+                    raise ConfigError("provider type must be ollama or openai-compatible")
+                if not base_url:
+                    raise ConfigError("provider base_url is required")
+                existing = providers.get(name)
+                if not isinstance(existing, dict):
+                    existing = {}
+                api_key = body.get("api_key")
+                if api_key is None or api_key == "":
+                    api_key = existing.get("api_key")
+                providers[name] = {
+                    "type": provider_type,
+                    "base_url": base_url,
+                    "api_key": str(api_key) if api_key else None,
+                    "timeout_seconds": float(body.get("timeout_seconds", 120)),
+                }
+                write_config_data(config_path, raw)
+                self._reload_config()
+            except (ConfigError, ProviderError, TypeError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            self._send_json({"ok": True, "provider": name})
+
+        def _handle_delete_provider(self, raw_name: str) -> None:
+            if config_path is None:
+                self._send_error(HTTPStatus.CONFLICT, "config file is not writable")
+                return
+            name = raw_name.strip()
+            try:
+                raw = read_config_data(config_path)
+                providers = raw.get("providers")
+                agents = raw.get("agents")
+                if not isinstance(providers, dict) or name not in providers:
+                    self._send_error(HTTPStatus.NOT_FOUND, "provider not found")
+                    return
+                if len(providers) == 1:
+                    raise ConfigError("cannot delete the last provider")
+                if isinstance(agents, dict):
+                    users = [
+                        agent_name
+                        for agent_name, agent in agents.items()
+                        if isinstance(agent, dict) and agent.get("provider") == name
+                    ]
+                    if users:
+                        raise ConfigError(
+                            f"provider is used by agents: {', '.join(sorted(users))}"
+                        )
+                del providers[name]
+                write_config_data(config_path, raw)
+                self._reload_config()
+            except (ConfigError, ProviderError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            self._send_json({"ok": True})
+
         def _handle_delete_agent(self, raw_name: str) -> None:
             if config_path is None:
                 self._send_error(HTTPStatus.CONFLICT, "config file is not writable")
@@ -422,14 +492,7 @@ def make_handler(
                     "bind_port": config.bind_port,
                 },
                 "agents_detail": self._agent_rows(),
-                "providers_detail": [
-                    {
-                        "name": provider.name,
-                        "type": provider.type,
-                        "base_url": provider.base_url,
-                    }
-                    for provider in config.providers.values()
-                ],
+                "providers_detail": self._provider_rows(),
                 "nodes": self._node_rows(),
                 "endpoints": [
                     "/api/node/health",
@@ -452,6 +515,18 @@ def make_handler(
                     "max_tokens": agent.max_tokens,
                 }
                 for agent in self._config().agents.values()
+            ]
+
+        def _provider_rows(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "name": provider.name,
+                    "type": provider.type,
+                    "base_url": provider.base_url,
+                    "has_api_key": bool(provider.api_key),
+                    "timeout_seconds": provider.timeout_seconds,
+                }
+                for provider in self._config().providers.values()
             ]
 
         def _node_rows(self) -> list[dict[str, Any]]:

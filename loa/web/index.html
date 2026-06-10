@@ -68,8 +68,38 @@
         <section class="panel">
           <div class="panel-title">
             <h2>Providery</h2>
+            <button class="icon-button" id="newProviderButton" title="Nowy provider">+</button>
           </div>
           <div id="providerList" class="list"></div>
+          <form id="providerForm" class="agent-form compact-form">
+            <label>
+              Nazwa
+              <input id="providerNameInput" name="name" autocomplete="off" required>
+            </label>
+            <label>
+              Typ
+              <select id="providerTypeInput" name="type" required>
+                <option value="ollama">ollama</option>
+                <option value="openai-compatible">openai-compatible</option>
+              </select>
+            </label>
+            <label>
+              Base URL
+              <input id="providerBaseUrlInput" name="base_url" autocomplete="off" placeholder="http://192.168.1.40:8765/v1" required>
+            </label>
+            <label>
+              API key
+              <input id="providerApiKeyInput" name="api_key" autocomplete="off" placeholder="opcjonalnie">
+            </label>
+            <label>
+              Timeout
+              <input id="providerTimeoutInput" name="timeout_seconds" type="number" min="1" step="1">
+            </label>
+            <div class="form-actions">
+              <button type="submit">Zapisz</button>
+              <button type="button" class="secondary-button" id="deleteProviderButton">Usun</button>
+            </div>
+          </form>
         </section>
 
         <section class="panel">

@@ -3,6 +3,7 @@ const state = {
   providers: [],
   nodes: [],
   selectedAgent: "",
+  selectedProvider: "",
   selectedNode: "",
   messages: [],
   busy: false,
@@ -13,6 +14,14 @@ const els = {
   serverLine: document.querySelector("#serverLine"),
   agentList: document.querySelector("#agentList"),
   providerList: document.querySelector("#providerList"),
+  providerForm: document.querySelector("#providerForm"),
+  providerNameInput: document.querySelector("#providerNameInput"),
+  providerTypeInput: document.querySelector("#providerTypeInput"),
+  providerBaseUrlInput: document.querySelector("#providerBaseUrlInput"),
+  providerApiKeyInput: document.querySelector("#providerApiKeyInput"),
+  providerTimeoutInput: document.querySelector("#providerTimeoutInput"),
+  deleteProviderButton: document.querySelector("#deleteProviderButton"),
+  newProviderButton: document.querySelector("#newProviderButton"),
   nodeList: document.querySelector("#nodeList"),
   agentSelect: document.querySelector("#agentSelect"),
   agentForm: document.querySelector("#agentForm"),
@@ -159,8 +168,10 @@ function fillAgentForm() {
 function renderProviders() {
   els.providerList.innerHTML = "";
   for (const provider of state.providers) {
-    const row = document.createElement("div");
+    const row = document.createElement("button");
+    row.type = "button";
     row.className = "row";
+    row.dataset.provider = provider.name;
     const models = provider.models || [];
     const detail = provider.ok
       ? `${provider.model_count} modeli`
@@ -170,11 +181,55 @@ function renderProviders() {
         <span>${escapeHtml(provider.name)}</span>
         <span class="pill ${provider.ok ? "ok" : "error"}">${provider.ok ? "OK" : "ERR"}</span>
       </span>
-      <span class="meta">${escapeHtml(detail)}</span>
+      <span class="meta">${escapeHtml(provider.type || "")} - ${escapeHtml(detail)}</span>
       ${models.length ? `<span class="muted">${escapeHtml(models.slice(0, 4).join(", "))}</span>` : ""}
     `;
+    row.addEventListener("click", () => {
+      selectProvider(provider.name);
+    });
     els.providerList.append(row);
   }
+
+  if (!state.selectedProvider && state.providers.length) {
+    state.selectedProvider = state.providers[0].name;
+  }
+  updateActiveProvider();
+  fillProviderForm();
+}
+
+function updateActiveProvider() {
+  document.querySelectorAll("[data-provider]").forEach((row) => {
+    row.classList.toggle("active", row.dataset.provider === state.selectedProvider);
+  });
+}
+
+function selectProvider(name) {
+  state.selectedProvider = name;
+  updateActiveProvider();
+  fillProviderForm();
+}
+
+function fillProviderForm() {
+  const provider = state.providers.find((item) => item.name === state.selectedProvider);
+  const usedByAgent = state.agents.some((agent) => agent.provider === provider?.name);
+  els.deleteProviderButton.disabled = !provider || state.providers.length <= 1 || usedByAgent;
+  if (!provider) {
+    els.providerNameInput.value = "";
+    els.providerTypeInput.value = "openai-compatible";
+    els.providerBaseUrlInput.value = "";
+    els.providerApiKeyInput.value = "";
+    els.providerApiKeyInput.placeholder = "opcjonalnie";
+    els.providerTimeoutInput.value = "120";
+    return;
+  }
+  els.providerNameInput.value = provider.name;
+  els.providerTypeInput.value = provider.type || "openai-compatible";
+  els.providerBaseUrlInput.value = provider.base_url || "";
+  els.providerApiKeyInput.value = "";
+  els.providerApiKeyInput.placeholder = provider.has_api_key
+    ? "klucz zapisany, zostaw puste aby zachowac"
+    : "opcjonalnie";
+  els.providerTimeoutInput.value = provider.timeout_seconds || 120;
 }
 
 function renderNodes() {
@@ -271,15 +326,20 @@ function renderMessages() {
 async function refresh() {
   setStatus("", "Sprawdzanie");
   try {
-    const [health, agents, providerModels, nodes, nodeStatuses] = await Promise.all([
+    const [health, agents, providers, providerModels, nodes, nodeStatuses] = await Promise.all([
       api("/api/health"),
       api("/api/agents"),
+      api("/api/providers"),
       api("/api/provider-models"),
       api("/api/nodes"),
       api("/api/nodes/status"),
     ]);
     state.agents = agents.agents;
-    state.providers = providerModels.providers;
+    const detailByName = new Map(providers.providers.map((provider) => [provider.name, provider]));
+    state.providers = providerModels.providers.map((provider) => ({
+      ...(detailByName.get(provider.name) || {}),
+      ...provider,
+    }));
     const statusByName = new Map(nodeStatuses.nodes.map((node) => [node.name, node]));
     state.nodes = nodes.nodes.map((node) => ({
       ...node,
@@ -300,6 +360,76 @@ async function refresh() {
     });
     renderMessages();
   }
+}
+
+async function saveProvider(event) {
+  event.preventDefault();
+  const payload = {
+    name: els.providerNameInput.value.trim(),
+    type: els.providerTypeInput.value,
+    base_url: els.providerBaseUrlInput.value.trim(),
+    api_key: els.providerApiKeyInput.value.trim() || undefined,
+    timeout_seconds: Number(els.providerTimeoutInput.value || 120),
+  };
+  try {
+    const result = await api("/api/providers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.selectedProvider = result.provider;
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Zapisano provider ${result.provider}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+async function deleteProvider() {
+  const name = els.providerNameInput.value.trim();
+  if (!name) {
+    return;
+  }
+  try {
+    await api(`/api/providers/${encodeURIComponent(name)}`, { method: "DELETE" });
+    state.selectedProvider = "";
+    await refresh();
+    state.messages.push({
+      role: "assistant",
+      label: "LoA",
+      content: `Usunieto provider ${name}.`,
+    });
+    renderMessages();
+  } catch (error) {
+    state.messages.push({
+      role: "error",
+      label: "Blad",
+      content: error.message,
+    });
+    renderMessages();
+  }
+}
+
+function newProvider() {
+  state.selectedProvider = "";
+  updateActiveProvider();
+  els.providerNameInput.value = "remote-loa";
+  els.providerTypeInput.value = "openai-compatible";
+  els.providerBaseUrlInput.value = "";
+  els.providerApiKeyInput.value = "";
+  els.providerApiKeyInput.placeholder = "opcjonalnie";
+  els.providerTimeoutInput.value = "120";
+  els.deleteProviderButton.disabled = true;
+  els.providerNameInput.focus();
 }
 
 async function saveNode(event) {
@@ -511,6 +641,9 @@ els.form.addEventListener("submit", sendMessage);
 els.agentForm.addEventListener("submit", saveAgent);
 els.deleteAgentButton.addEventListener("click", deleteAgent);
 els.newAgentButton.addEventListener("click", newAgent);
+els.providerForm.addEventListener("submit", saveProvider);
+els.deleteProviderButton.addEventListener("click", deleteProvider);
+els.newProviderButton.addEventListener("click", newProvider);
 els.nodeForm.addEventListener("submit", saveNode);
 els.deleteNodeButton.addEventListener("click", deleteNode);
 els.newNodeButton.addEventListener("click", newNode);
